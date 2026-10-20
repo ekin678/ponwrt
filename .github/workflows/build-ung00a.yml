@@ -66,6 +66,21 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
+      - name: Restore missing libffi package
+        run: |
+          if [ -f package/libs/libffi/Makefile ]; then
+            echo "libffi already present, nothing to do"
+            exit 0
+          fi
+          echo "::warning::package/libs/libffi is missing in this repository (upstream bug), restoring it from immortalwrt"
+          git clone --depth 1 --filter=blob:none --sparse \
+            https://github.com/immortalwrt/immortalwrt.git /tmp/imm
+          git -C /tmp/imm sparse-checkout set package/libs/libffi
+          cp -r /tmp/imm/package/libs/libffi package/libs/libffi
+          test -f package/libs/libffi/Makefile
+          echo "---- restored ----"
+          find package/libs/libffi -type f | head -20
+
       - name: Cache downloads
         uses: actions/cache@v4
         with:
@@ -104,12 +119,43 @@ jobs:
             echo "ERROR: unionman_ung00a is not selected"
             exit 1
           }
+          if ! grep -q "^CONFIG_PACKAGE_libffi=y" .config && ! grep -q "^CONFIG_PACKAGE_libffi-y" .config; then
+            echo "ERROR: libffi is still not selected - python3 and other packages would fail"
+            grep -n "libffi" .config | head -20
+            exit 1
+          fi
+          echo "libffi: OK"
 
       - name: Download sources
         run: make download -j8
 
       - name: Build firmware
-        run: make -j"$(nproc)"
+        run: |
+          set -o pipefail
+          make -j"$(nproc)" 2>&1 | tee /tmp/build-full.log | tail -n 3000
+
+      - name: Dump failure info
+        if: failure()
+        run: |
+          {
+            echo "## First error lines"
+            echo '```'
+            grep -n -m 8 -i -E "error:|Error [0-9]|No space left|Killed|out of memory|recipe for target" /tmp/build-full.log || echo "(no match)"
+            echo '```'
+            echo "## Last 150 lines"
+            echo '```'
+            tail -n 150 /tmp/build-full.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: /tmp/build-full.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Show result
         run: |
