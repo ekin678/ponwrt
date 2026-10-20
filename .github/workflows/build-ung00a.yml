@@ -119,12 +119,32 @@ jobs:
             echo "ERROR: unionman_ung00a is not selected"
             exit 1
           }
-          if ! grep -q "^CONFIG_PACKAGE_libffi=y" .config && ! grep -q "^CONFIG_PACKAGE_libffi-y" .config; then
-            echo "ERROR: libffi is still not selected - python3 and other packages would fail"
-            grep -n "libffi" .config | head -20
-            exit 1
+          {
+            echo "## Configure diagnostics"
+            echo '```'
+            echo "--- package/libs/libffi ---"
+            ls -l package/libs/libffi || true
+            echo "--- key symbols ---"
+            grep -E "^CONFIG_PACKAGE_(python3|libffi)=" .config || echo "(neither python3 nor libffi selected)"
+            echo "--- remaining libffi warnings ---"
+            echo "(see log above)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if grep -q "^CONFIG_PACKAGE_python3=y" .config; then
+            echo "python3 is enabled, libffi is required"
+            if ! grep -q "^CONFIG_PACKAGE_libffi=y" .config; then
+              echo "libffi missing -> forcing it on"
+              sed -i 's/^# CONFIG_PACKAGE_libffi is not set/CONFIG_PACKAGE_libffi=y/' .config
+              make defconfig
+            fi
+            grep -q "^CONFIG_PACKAGE_libffi=y" .config || {
+              echo "ERROR: python3 is enabled but libffi still not selected"
+              exit 1
+            }
+            echo "libffi: OK (python3 enabled -> libffi selected)"
+          else
+            echo "python3 not selected -> libffi not required, skipping assertion"
           fi
-          echo "libffi: OK"
 
       - name: Download sources
         run: make download -j8
@@ -137,16 +157,20 @@ jobs:
       - name: Dump failure info
         if: failure()
         run: |
-          {
-            echo "## First error lines"
-            echo '```'
-            grep -n -m 8 -i -E "error:|Error [0-9]|No space left|Killed|out of memory|recipe for target" /tmp/build-full.log || echo "(no match)"
-            echo '```'
-            echo "## Last 150 lines"
-            echo '```'
-            tail -n 150 /tmp/build-full.log
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          if [ -f /tmp/build-full.log ]; then
+            {
+              echo "## First error lines"
+              echo '```'
+              grep -n -m 8 -i -E "error:|Error [0-9]|No space left|Killed|out of memory|recipe for target" /tmp/build-full.log || echo "(no match)"
+              echo '```'
+              echo "## Last 150 lines"
+              echo '```'
+              tail -n 150 /tmp/build-full.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Job failed before the build step started, no compile log available." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Upload build log on failure
         if: failure()
