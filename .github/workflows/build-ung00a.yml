@@ -81,6 +81,24 @@ jobs:
           echo "---- restored ----"
           find package/libs/libffi -type f | head -20
 
+      - name: Patch UNG00A bootloader artifacts (preloader.bin / bl31-uboot.fip)
+        run: |
+          # 1) 给 unionman_ung00a 设备定义补上 ARTIFACT（当前 master 源码只产出 itb，缺引导组件定义）
+          sed -i '/^define Device\/unionman_ung00a/,/^endef/ s|^  DEVICE_PACKAGES := kmod-gpio-button-hotplug|  ARTIFACT/preloader.bin := an7581-preloader rfb\n  ARTIFACT/bl31-uboot.fip := an7581-bl31-uboot rfb\n  ARTIFACTS := preloader.bin bl31-uboot.fip\n  DEVICE_PACKAGES := kmod-gpio-button-hotplug|' \
+            target/linux/airoha/image/an7581.mk
+          grep -A 6 "ARTIFACT/preloader.bin" target/linux/airoha/image/an7581.mk | head -10
+          grep -q "ARTIFACT/preloader.bin := an7581-preloader rfb" target/linux/airoha/image/an7581.mk || {
+            echo "ERROR: failed to patch an7581.mk (ung00a ARTIFACT lines missing)"
+            exit 1
+          }
+          # 2) 把 ung00a 挂到 an7581_rfb U-Boot 的 BUILD_DEVICES，确保只选 ung00a 时也会编译引导组件
+          sed -i 's|BUILD_DEVICES:=airoha_an7581-evb airoha_an7581-evb-emmc-eagle airoha_an7581-evb-emmc-kite|BUILD_DEVICES:=airoha_an7581-evb airoha_an7581-evb-emmc-eagle airoha_an7581-evb-emmc-kite unionman_ung00a|' \
+            package/boot/uboot-airoha/Makefile
+          grep "BUILD_DEVICES.*unionman_ung00a" package/boot/uboot-airoha/Makefile || {
+            echo "ERROR: failed to patch uboot-airoha/Makefile (BUILD_DEVICES not updated)"
+            exit 1
+          }
+
       - name: Cache downloads
         uses: actions/cache@v4
         with:
@@ -185,6 +203,13 @@ jobs:
         run: |
           ls -lh bin/targets/airoha/an7581/
           du -sh bin/targets/airoha/an7581/
+          for f in \
+            bin/targets/airoha/an7581/ponwrt-airoha-an7581-unionman_ung00a-preloader.bin \
+            bin/targets/airoha/an7581/ponwrt-airoha-an7581-unionman_ung00a-bl31-u-boot.fip
+          do
+            [ -f "$f" ] || { echo "ERROR: bootloader artifact missing: $f"; ls -l bin/targets/airoha/an7581/; exit 1; }
+          done
+          echo "bootloader artifacts OK"
 
       - name: Upload firmware
         uses: actions/upload-artifact@v4
@@ -193,6 +218,7 @@ jobs:
           path: |
             bin/targets/airoha/an7581/*.itb
             bin/targets/airoha/an7581/*.bin
+            bin/targets/airoha/an7581/*.fip
             bin/targets/airoha/an7581/profiles.json
             bin/targets/airoha/an7581/sha256sums
           if-no-files-found: error
