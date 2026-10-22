@@ -44,7 +44,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Free disk space
         run: |
@@ -153,7 +153,7 @@ jobs:
             echo "ERROR: arm-trusted-firmware-airoha/Makefile patch failed (bl2/bl31 not both updated)"; exit 1; }
 
       - name: Cache downloads
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: dl
           key: ponwrt-dl-ung00a-${{ hashFiles('feeds.conf.default') }}
@@ -223,7 +223,7 @@ jobs:
       - name: Dump failure info
         if: failure()
         run: |
-          # 日志先落到工作区内，upload-artifact@v4 对绝对路径（/tmp）行为不稳定，
+          # 日志先落到工作区内，upload-artifact 对工作区外绝对路径（/tmp）行为不稳定，
           # 用工作区相对路径最稳
           mkdir -p build-logs
           cp -f /tmp/build-full.log build-logs/build-full.log 2>/dev/null || true
@@ -245,7 +245,7 @@ jobs:
 
       - name: Upload build log on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: build-log
           path: build-logs/
@@ -295,7 +295,7 @@ jobs:
       # ── 上传：永远执行，即使上面的断言/构建有问题也把已有文件传上去 ──
       - name: Upload firmware
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ponwrt-an7581-unionman_ung00a
           path: |
