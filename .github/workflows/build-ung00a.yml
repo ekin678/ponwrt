@@ -98,6 +98,16 @@ jobs:
             echo "ERROR: failed to patch uboot-airoha/Makefile (BUILD_DEVICES not updated)"
             exit 1
           }
+          # 3) 把 ung00a 挂到 ATF an7581-bl2 / an7581-bl31 的 BUILD_DEVICES。
+          #    否则只选 ung00a 时 ATF bl2/bl31 包不会编译，STAGING_DIR_IMAGE 里缺
+          #    an7581-bl2.bin / an7581-bl31.lzma，镜像生成阶段 ARTIFACT 失败，
+          #    表现为 "ERROR: target/linux failed to build."（silent 模式下看不到细节）
+          sed -i 's|BUILD_DEVICES:=airoha_an7581-evb airoha_an7581-evb-emmc-eagle airoha_an7581-evb-emmc-kite nokia_valyrian nokia_xg-040g-md-ubi|BUILD_DEVICES:=airoha_an7581-evb airoha_an7581-evb-emmc-eagle airoha_an7581-evb-emmc-kite nokia_valyrian nokia_xg-040g-md-ubi unionman_ung00a|g' \
+            package/boot/arm-trusted-firmware-airoha/Makefile
+          grep -c "BUILD_DEVICES.*unionman_ung00a" package/boot/arm-trusted-firmware-airoha/Makefile | grep -q "^2$" || {
+            echo "ERROR: failed to patch arm-trusted-firmware-airoha/Makefile (bl2/bl31 BUILD_DEVICES not both updated)"
+            exit 1
+          }
 
       - name: Cache downloads
         uses: actions/cache@v4
@@ -172,6 +182,15 @@ jobs:
           set -o pipefail
           make -j"$(nproc)" 2>&1 | tee /tmp/build-full.log | tail -n 3000
 
+      - name: Verbose image-build retry on failure
+        if: failure()
+        continue-on-error: true
+        run: |
+          # silent 并行构建会把镜像生成的真实报错吞掉，失败时用 V=s -j1 重跑
+          # target/linux/install 抓详细错误（只重跑镜像生成，不重编内核，耗时有限）
+          timeout 2400 make -j1 V=s target/linux/install > /tmp/verbose-fail.log 2>&1 || true
+          tail -n 100 /tmp/verbose-fail.log
+
       - name: Dump failure info
         if: failure()
         run: |
@@ -195,7 +214,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: build-log
-          path: /tmp/build-full.log
+          path: |
+            /tmp/build-full.log
+            /tmp/verbose-fail.log
           if-no-files-found: ignore
           retention-days: 7
 
